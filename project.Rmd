@@ -1,0 +1,769 @@
+---
+title: "Predicting Student Performance using Linear Regression"
+output: html_document
+author: "Mohamed Sabbah - 2056136"
+---
+
+```{=html}
+<style>
+.centered {
+  text-align: center;
+}
+</style>
+<header>
+```
+
+------------------------------------------------------------------------
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+options(repos = c(CRAN = "https://cran.rstudio.com"))
+#install.packages("tidyr")
+#install.packages("reshape2")
+#install.packages("coda")
+#install.packages("R2jags")
+#install.packages("nortest")
+#install.packages("car")
+#install.packages("e1071")
+library(nortest)
+library(car)
+library(tidyr)
+library(ggplot2)
+library(reshape2)
+library(R2jags)
+library(e1071) 
+library(knitr)
+library(dplyr)
+```
+
+# Introduction
+
+As a student, I've always been intrigued about what exactly affects academic performance. Factors like the amount of time spent studying as well as extracurricular activities and balanced sleep have always been pushed as great indicators of one's academic performance. But how big of an effect do they have? The purpose of this study is to answer the question: What leads to academic success? And what factors play the biggest role?
+
+# The Dataset
+
+[The Student Performance Dataset](https://www.kaggle.com/datasets/nikhil7280/student-performance-multiple-linear-regression/data) consists of 10,000 student records aimed at examining factors that influence academic success. It includes several predictor variables:
+
+-   Hours Studied: Total hours dedicated to studying.
+
+-   Previous Scores: Scores from earlier tests.
+
+-   Extracurricular Activities: Indicates whether a student participates in activities outside of academics (Yes or No).
+
+-   Sleep Hours: Average daily sleep duration.
+
+-   Sample Question Papers Practiced: Number of practice papers completed.
+
+-   The Performance Index serves as the target variable, quantifying academic performance on a scale from 10 to 100, with higher scores reflecting better performance.
+
+# EDA
+
+We start with an explanatory data analysis for the dataset, we first display the dataset as shown below.
+
+```{r ,align='center',echo=FALSE}
+data <- read.csv('Data/Student_Performance.csv')
+colnames(data) <- gsub("\\.", "_", colnames(data))
+kable(head(data),caption = "First 5 rows of the dataset")
+```
+
+The next step is getting the summaries for the different columns, these summaries include the mean, median, minimum, maximum, and quantiles of said columns.
+
+```{r ,align='center',echo=FALSE}
+kable(summary(data), caption = "Dataset statistical summary")
+```
+
+The summary shows important details about the variables, including hours studied (mean: 4.99), previous scores (mean: 69.45), sleep hours (mean: 6.53), and sample question papers practiced (mean: 4.58). The performance index, which ranges from 10 to 100 with a mean of 55.22, serves as the target variable.
+
+The next step is to check for missing values in the dataset, as you can see there are 0 missing values.
+
+```{r ,align='center',echo=FALSE}
+kable(colSums(is.na(data)), caption = "Count of missing values for each variable")
+```
+
+## Univariate analysis and visualizations
+
+### Hours studied
+
+First, we'll analyze the hours studied column. We'll start by checking the unique values to see which plot we'll use to visualize it.
+
+```{r ,align='center',echo=FALSE}
+print(paste("Unique values:", paste(unique(data$Hours_Studied), collapse = ", ")))
+```
+
+As we have a small range of values, with said values being discrete numerical values, we'll use a bar plot.
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(x = Hours_Studied, fill = as.factor(Hours_Studied))) + 
+  geom_bar() +  
+scale_fill_viridis_d(guide="none")+
+  scale_x_continuous(breaks = 1:length(unique(data$Hours_Studied)))+
+  labs(x = "Hours Studied",title = "Hours Studied count bar plot") 
+```
+
+As shown on the bar plot above, the number of hours studied with the highest frequency is one hour. However, all values have very close counts.
+
+### Previous scores
+
+Next, we'll be looking at the Previous scores, we'll be using a histogram to check for an underlying distribution as it is a continuous column.
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(x=Previous_Scores,y = after_stat(density)))+
+ geom_histogram( color = "darkblue", fill = "lightblue", bins = 30)+
+  geom_density(lwd = 1.2,
+               linetype = 2,
+               colour = 2)+
+  xlim(c(min(data$Previous_Scores), max(data$Previous_Scores)))+
+  labs(x="Previous Scores", title="Previous Scores Density")
+
+```
+
+```{r ,align='center',echo=FALSE}
+paste("Skewnsess:",skewness(data$Previous_Scores))
+```
+
+As shown above, trying to fit a distribution to the data doesn't really tell us much. However, we have a peak around the score 60 and the data seems to be very symmetrical as the skewness value is close to 0. We'll use a box plot to further explore the variable.
+
+```{r ,fig.height=5, fig.width=3,align='center',echo=FALSE}
+ggplot(data,aes(y=Previous_Scores))+
+geom_boxplot(color = "darkblue", fill = "lightblue" )+
+labs(y="Previous Scores", title="Previous Scores Boxplot") 
+
+```
+
+This plot further emphasizes the information we got from the summary.
+
+### Extracurricular Activities
+
+Next up is the extracurricular activities column, which is comprised of yes or no answers when it comes to whether or not students participated in them. Hence, it is considered a binary discrete variable, so we'll use a Pie chart to visualize the data.
+
+```{r ,align='center',echo=FALSE}
+mytable <- table(data$Extracurricular_Activities)
+percentages <- round(100 * mytable / sum(mytable), 1)
+lbls <- paste(names(mytable), "\n", percentages, "%", sep="")
+pie(mytable, labels = lbls,
+   main="Extracurricular activities participation", cex = 0.6)
+```
+
+As we can see, the results are very close and are almost even, with 50.5% of the students not participating in extracurricular activities as opposed to 49.5% who do.
+
+### Hours slept
+
+We shall repeat the same process for the Hours slept variable as we did for the hours studied one.
+
+```{r ,align='center',echo=FALSE}
+print(paste("Unique values:", paste(unique(data$Sleep_Hours), collapse = ", ")))
+```
+
+As we have a small range of values, with said values being discrete numerical values, we'll use a bar plot.
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(x = Sleep_Hours, fill = as.factor(Sleep_Hours))) + 
+  geom_bar() +  
+ scale_fill_viridis_d(guide="none") +
+scale_x_continuous(breaks = seq(min(data$Sleep_Hours), max(data$Sleep_Hours), by = 1)) +
+  labs(x = "Hours slept",title = "Hours Slept count bar plot") 
+```
+
+The barplot shows us that the highest count of students sleep for 8 hours on average, however, the values are all close to each other again.
+
+### Sample question papers practiced
+
+We shall repeat the same process for the sample question papers practiced variable as we did for the hours studied and the hours slept variables.
+
+```{r ,align='center',echo=FALSE}
+print(paste("Unique values:", paste(unique(data$Sample_Question_Papers_Practiced), collapse = ", ")))
+```
+
+As we have a small range of values, with said values being discrete numerical values, we'll use a bar plot.
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(x = Sample_Question_Papers_Practiced, fill = as.factor(Sample_Question_Papers_Practiced))) + 
+  geom_bar() +  
+  scale_fill_viridis_d(guide="none")  +
+scale_x_continuous(breaks = seq(min(data$Sample_Question_Papers_Practiced), max(data$Sample_Question_Papers_Practiced), by = 1)) +
+  labs(x = "Sample question papers practiced",title = "Sample question papers practiced count bar plot") 
+```
+
+All classes again have very close counts.
+
+### Performance Index
+
+Last, but not least, we shall look into the performance index variable. As it is a continuous variable, we'll visualize it using a histogram as well as trying to fit a distribution to it as well as calculating its skewness.
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(x=Performance_Index))+
+ geom_histogram( aes(y = after_stat(density)),color = "darkblue", fill = "lightblue", bins = 25)+
+   geom_density(lwd = 1.2,
+               linetype = 2,
+               colour = 2)+ 
+    xlim(c(0,100))+
+
+  labs(x="Performance Index",title="Performance Index Density")
+
+```
+
+```{r ,align='center',echo=FALSE}
+paste("Skewness:",skewness(data$Performance_Index))
+
+```
+
+As seen from both the plot and the skewness score, the target variable is symmetrical. So, we shall check for normality next. We'll use the Anderson-Darling test as well as a qqplot.
+
+```{r ,align='center',echo=FALSE}
+
+print(ad.test(data$Performance_Index))
+qqPlot(data$Performance_Index, ylab = "Performance Index", 
+       main = "Performance Index QQ Plot")
+
+
+```
+
+Given the very low AD test score, and since the points deviate from the line on the qqplot, we can conclude that the Performance Index variable does not follow a normal distribution.
+
+## Bivariate analysis and visualizations
+
+The next step in the EDA is to look at the relationship between the different independent variables and the target variable.
+
+### Hours studied and performance index
+
+We first start by looking at the hours studied variable and its relationship with the target variable. In order to visualize said relationship, we shall use a boxplot.
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(y = Performance_Index, x = factor(Hours_Studied), fill = factor(Hours_Studied))) +
+  geom_boxplot() +
+  scale_fill_viridis_d(guide="none") +
+  labs(y = "Performance Index", x = "Hours Studied", title="Performance Index in relation to Hours studied")
+
+```
+
+As seen above, there is a positive relationship between both variables, with the more hours studied the higher the students scored on average.
+
+### Previous scores and Performance Index
+
+Since both the Previous scores and the performance Index variables are continuous. We shall visualize the relationship using a scatter plot with a best fit line.
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(x = Previous_Scores, y = Performance_Index)) + 
+  geom_point(color="light blue") + 
+  geom_smooth(method = "lm", se = FALSE) +  
+  labs(x = "Previous Scores", y = "Performance Index",title="Performance Index in relation to Previous scores") + 
+  theme_minimal()
+```
+
+As shown in the figure above, there is a positive relationship between both variables as the higher a student's score is, the better their performance index is on average.
+
+### Extracurricular Activities and Performance Index
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(y = Performance_Index, x = factor(Extracurricular_Activities), fill = factor(Extracurricular_Activities))) +
+  geom_boxplot() +
+  scale_fill_viridis_d(guide = "none") +
+  labs(y = "Performance Index", x = "Extracurricular Activities",title="Performance Index in relation to Extracurricular Activities")
+```
+
+As shown from the box plot, participation in extracurricular activities does not seem to have a big effect on a student's performance index as both classes seem to have very close values.
+
+### Hours slept and Performance Index
+
+```{r ,align='center',echo=FALSE}
+ggplot(data, aes(y = Performance_Index, x = factor(Sleep_Hours), fill = factor(Sleep_Hours))) +
+  geom_boxplot() +
+  scale_fill_viridis_d(guide="none") +
+  labs(y = "Performance Index", x = "Hours Slept")
+
+```
+
+Like the previous variable, there doesn't seem to be a strong relationship between the amount of sleep a student gets and their academic performance.
+
+### Sample question papers practiced and Performance Index
+
+Once again, as the sample papers answered parameter is discrete, we use a boxplot to explore the relationship with the target variable.
+
+```{r ,align='center',echo=FALSE}
+
+ggplot(data,aes(y=Performance_Index,x=factor(Sample_Question_Papers_Practiced),fill = factor((Sample_Question_Papers_Practiced))))+
+geom_boxplot()+
+scale_fill_viridis_d(guide="none") +
+labs(y="Performance Index",x="Sample Question Papers Practiced") 
+
+```
+
+There isn't much variation in the performance index for the different values as shown in the graph above.
+
+### Correlation Matrix Heatmap
+
+```{r ,align='center',echo=FALSE}
+data$Extracurricular_Activities <- ifelse(data$Extracurricular_Activities == "Yes", 1, 0)
+cor_matrix <- cor(data[, c("Hours_Studied","Previous_Scores","Sleep_Hours","Sample_Question_Papers_Practiced","Extracurricular_Activities","Performance_Index" )])
+cor_data <- melt(cor_matrix)
+ggplot(cor_data, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +  
+  scale_fill_viridis_c() + 
+  geom_text(aes(label = round(value, 2)), color = "white", size = 2) +  
+  labs(x = "", y = "", title = "Correlation Matrix Heatmap") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+According to the correlation matrix heatmap, the variables that have the strongest relationship with the performance index are the previous scores and the hours studied variables. Which makes sense both logically and from the previously displayed graphs. All the other variables have a very weak correlation with the target variable.
+
+# The models
+
+## The frequentist approach
+
+We will first start with a frequentist approach to solve this problem. After conducting an EDA, we can see that a linear model might be appropriate due to the relationships between the variables. A linear model is a mathematical equation that models the relationship between a dependent variable and one or more independent variables by assuming the relationship is linear. The model for multiple predictors can be expressed as:
+
+$$
+Y = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \dots + \beta_p X_p + \epsilon
+$$
+
+Where: $X_1, X_2, \dots, X_p$ are the independent variables. $\beta_1, \beta_2, \dots, \beta_p$ are the corresponding coefficients for each variable. The goal of fitting a linear model is to estimate the parameters $\beta_0, \beta_1, \dots, \beta_p$ using ordinary least squares (OLS), which minimizes the sum of squared residuals (the differences between observed and predicted values). The error term $\epsilon$ represents random variability and is assumed to follow a normal distribution with zero mean and constant variance.
+
+This is a frequentist approach because it estimates parameters from the observed data, without incorporating prior beliefs or distributions about the parameters. This assumes that the data comes from a fixed, true distribution, and the parameters are fixed but unknown quantities estimated from the sample. Inference, such as confidence intervals and hypothesis testing, is based on the sampling distribution of the estimates.
+
+### The linear model
+
+```{r ,align='center'}
+linear_model <- lm(Performance_Index~Hours_Studied+Previous_Scores+Sleep_Hours+Sample_Question_Papers_Practiced+Extracurricular_Activities,data)
+print(summary(linear_model))
+```
+
+The linear model summary shows that all predictors are statistically significant (p \< 2e-16) in predicting the Performance Index. The adjusted R-squared value is 0.9887, indicating that about 98.87% of the variance in the Performance Index is explained by the model. The residuals are small, with a residual standard error of 2.038. This suggests the model fits the data very well. All variables have a positive impact on the Performance Index.
+
+The next step is to train the model. We start by splitting the data into training and testing data sets. The split is a 75% training and 25% testing data.
+
+```{r ,align='center',echo=FALSE}
+set.seed(1245)
+
+tr_size <- nrow(data) *0.75
+
+ind <- sample(1:nrow(data), size = tr_size, replace = F)
+train <- data[ind, ]
+test <-  data[-ind, ]
+
+paste("train length:", nrow(train))
+paste("test length:", nrow(test))
+
+```
+
+Then we fit the model using the training dataset.
+
+```{r ,align='center'}
+linear_model_freq <- lm(Performance_Index~Hours_Studied+Previous_Scores+Sleep_Hours+Sample_Question_Papers_Practiced+Extracurricular_Activities,train)
+print(summary(linear_model_freq))
+
+```
+
+After the model was trained successfully, we now make predictions using the testing dataset and calculate the residuals. But first,we check the parameter credible intervals.
+
+```{r ,align='center',echo=FALSE}
+print(confint(linear_model_freq))
+
+```
+
+Now we use the test dataset to make predictions and check the residuals.
+
+```{r ,align='center',echo=FALSE}
+predictions <- as.data.frame(predict(linear_model_freq, newdata = test,interval = "prediction"))
+test$y_hat<-predictions$fit
+lower<-predictions$lwr
+upper <- predictions$upr
+test$residuals <- test$Performance_Index - test$y_hat
+mean_residual <- mean(test$residuals)
+paste("mean residual:",mean_residual)
+```
+
+The model is performing exceptionally well, below is a visualization of the results. The graph shows the observed vs predicted values as well as the credible intervals for the results.
+
+```{r ,align='center',echo=FALSE}
+
+ggplot(test, aes(x = test$Performance_Index, y = test$y_hat)) +
+  geom_point(color="light blue") +                       
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") + 
+  geom_line(aes(x =lower , y = test$y_hat), color = "red") +  
+  geom_line(aes(x = upper, y = test$y_hat), color = "green") + 
+  labs(title = "Observed vs. Predicted Values",
+       x = "Observed Values",
+       y = "Predicted Values") 
+
+```
+
+## The Bayesian Approach
+
+In this model, we use a Bayesian linear regression approach to estimate the relationship between a continuous response variable and several predictor variables. The model assumes that the response variable, $Y$, is normally distributed, with its mean, $\mu$, being a linear combination of the predictor variables, and the error is modeled by a precision parameter, $\tau$ (the inverse of variance). The general form of the model is as follows:
+
+$$
+Y_i \sim N(\mu_i, \tau)
+$$ 
+$$
+\mu_i = \beta_0 + \beta_1 X_{1i} + \beta_2 X_{2i} + \dots + \beta_p X_{pi}
+$$
+
+We adopt a Bayesian framework, which involves specifying prior distributions for all the unknown parameters in the model. In this case, we use weakly informative priors, which are designed to provide some initial regularization but are broad enough not to dominate the posterior in the presence of sufficient data.
+
+For the regression coefficients $\beta_0, \beta_1, \dots, \beta_p$, we assume independent normal priors with a mean of 0 and a small precision (large variance):
+
+$$
+\beta_j \sim \mathcal{N}(0, 0.1) \quad \text{for } j = 0, 1, \dots, p
+$$
+
+These weakly informative priors reflect our initial belief that the parameters are likely to be close to 0, but they allow for large deviations based on the data. This helps to regularize the model without imposing strong assumptions.
+
+For the precision parameter $\tau$, we assign a Gamma prior:
+
+$$
+\tau \sim \text{Gamma}(0.1, 0.1)
+$$
+
+The Gamma distribution is commonly used as a prior for precision in Bayesian models, and the parameters $0.1$ and $0.1$ make it a weakly informative prior, allowing the data to significantly influence the posterior distribution.
+
+The likelihood function specifies how the observed data are generated given the model parameters. For each observation $i$, the response variable $Y_i$ is assumed to follow a normal distribution centered around $\mu_i$ with precision $\tau$:
+
+$$
+Y_i \sim \mathcal{N}(\mu_i, \tau)
+$$
+
+The mean $\mu_i$ is modeled as a linear combination of the predictors $X_{1i}, X_{2i}, \dots, X_{pi}$ and the corresponding coefficients $\beta_1, \beta_2, \dots, \beta_p$.
+
+In the Bayesian framework, we combine the prior distributions with the likelihood to obtain the posterior distributions of the model parameters. This is achieved using Markov Chain Monte Carlo (MCMC) methods, such as Gibbs sampling in JAGS, which allows us to generate samples from the posterior distribution.
+
+The posterior distributions provide not just point estimates for the parameters but a full distribution, allowing us to quantify uncertainty and make probabilistic statements about the parameters.
+
+This Bayesian model incorporates weakly informative priors to regularize the parameter estimates while allowing the data to drive the inference. The Bayesian approach provides a probabilistic interpretation of the model parameters, giving us posterior distributions that reflect the uncertainty in our estimates.
+
+### Linear model with weakly informative priors
+
+```{r ,align='center'}
+jags_data<- list(
+  N = nrow(train),
+  performance_index = train$Performance_Index,
+  hours_studied = train$Hours_Studied,
+  previous_scores = train$Previous_Scores,
+  sleep_hours = train$Sleep_Hours,
+  sample_question_papers_practiced = train$Sample_Question_Papers_Practiced,
+  extracurricular_activities = train$Extracurricular_Activities
+)
+
+jags_code<- "
+model {
+#priors
+beta0 ~ dnorm(0,0.1)
+beta_hours_studied ~ dnorm(0,0.1)
+beta_previous_scores ~ dnorm(0,0.1)
+beta_sleep_hours ~ dnorm(0,0.1)
+beta_sample_question_papers_practiced ~ dnorm(0,0.1)
+beta_extracurricular_activities ~ dnorm(0,0.1)
+tau ~ dgamma(0.1, 0.1)
+
+#likelihood
+for (i in 1:N) {
+    mu[i] <- beta0 +beta_hours_studied * hours_studied[i] + beta_previous_scores * previous_scores[i]+beta_sleep_hours * sleep_hours[i] + beta_sample_question_papers_practiced * sample_question_papers_practiced[i] + beta_extracurricular_activities * extracurricular_activities[i] 
+    
+             
+    performance_index[i] ~ dnorm(mu[i], tau) 
+  }
+
+
+
+
+
+
+}
+"
+jags_model <- jags(data = jags_data, inits = NULL,
+                   parameters.to.save = c("beta0", "beta_hours_studied", "beta_previous_scores",
+                                          "beta_sleep_hours","beta_sample_question_papers_practiced",
+                                          'beta_extracurricular_activities', "tau"), 
+                   model.file = textConnection(jags_code), 
+                   n.chains = 3, n.iter = 12000, n.burnin = 2000, n.thin = 10)
+
+```
+
+```{r ,align='center'}
+jags_model
+```
+
+### Alternative model with stronger priors
+
+Now let's try an alternative model. In this model, we'll use stronger priors based on some previous literature. The first one is the prior for hours slept, as according to [M. Suardiaz-Muro](https://pubmed.ncbi.nlm.nih.gov/32627159/), students' sleeping patterns $X \sim N(6.7, 1)$, hence, we shall use this as our prior distribution for the hours slept coefficient. The second one it for the previous score one, there's a lot of literature discussing the academic performance of students as well as statistical models for them. [According to California State University Long Beach Grade Statistics](https://www.csulb.edu/institutional-research-analytics/student-grades-dashboards), students' grade $X \sim N(77.5, 100)$. Below is the new model as well as its summary.
+
+```{r ,align='center'}
+
+jags_code_alt<- "
+model {
+#priors
+beta0 ~ dnorm(0,0.1)
+beta_hours_studied ~ dnorm(0,0.1)
+beta_previous_scores ~ dnorm(75,0.01)
+beta_sleep_hours ~ dnorm(6.7, 1)
+beta_sample_question_papers_practiced ~ dnorm(0,0.1)
+beta_extracurricular_activities ~ dnorm(0,0.1)
+tau ~ dgamma(0.1, 0.1)
+
+#likelihood
+for (i in 1:N) {
+    mu[i] <- beta0 +beta_hours_studied * hours_studied[i] + beta_previous_scores * previous_scores[i]+beta_sleep_hours * sleep_hours[i] + beta_sample_question_papers_practiced * sample_question_papers_practiced[i] + beta_extracurricular_activities * extracurricular_activities[i] 
+    
+             
+    performance_index[i] ~ dnorm(mu[i], tau) 
+  }
+
+
+
+
+
+
+}
+"
+jags_model_alt <- jags(data = jags_data, inits = NULL,
+                   parameters.to.save = c("beta0", "beta_hours_studied", "beta_previous_scores",
+                                          "beta_sleep_hours","beta_sample_question_papers_practiced",
+                                          'beta_extracurricular_activities', "tau"), 
+                   model.file = textConnection(jags_code_alt), 
+                   n.chains = 3, n.iter = 12000, n.burnin = 2000, n.thin = 10)
+
+```
+
+```{r ,align='center'}
+jags_model_alt
+```
+
+### Model comparison
+
+When choosing between the two models, there are multiple statistics we can use to choose the better one. But before that we'll look at the estimates for the parameters just to compare the two. We can see that there are very small differences between both models, however these differences are negligible.
+
+#### Deviance and DIC
+
+The next step is to look at the deviance and the DIC(Deviance Information Criterion) of the models, but first we'll explain exactly what these are. Deviance is a measure of the goodness of fit of a statistical model. it is calculated as: $$
+\text{Deviance} = -2 \times \left( \log \text{-likelihood of the fitted model} - \log \text{-likelihood of the saturated model} \right)
+$$ Where the saturated model is a model that perfectly fits the data (it has as many parameters as there are points). This means that a lower deviance indicates a better fit. The DIC on the other hand incorporates both the deviance of a model as well as its complexity, it is defined as: $$
+\text{DIC} = \text{Deviance} + 2 \times p_D$$
+
+where
+
+$$
+p_D = \frac{\text{var}(\text{deviance})}{2}
+$$ And since DIC provides a trade-off between goodness of fit and complexity, Lower DIC values indicate a better model, balancing goodness of fit (low deviance) with simplicity (low effective parameters). Now when it comes to our models, the first model has a DIC of 32054.9 compared to the second model's 32055.4. The difference in deviance is also very small but the first model is also lower with a deviance of 32047.783 compared to the second model's 32047.773. Since both DIC values are so similar, we will look into the $\hat{R}$ values of the models.
+
+#### $\hat{R}$
+
+Rhat, also known as the potential scale reduction factor, is a diagnostic statistic used in Bayesian analysis to assess the convergence of Markov Chain Monte Carlo (MCMC) simulations. It is calculated by:
+
+$$
+\hat{R} = \sqrt{\frac{V_{\text{between}} + (N + 1) \cdot V_{\text{within}}}{N}}
+$$
+
+where:
+
+-   $V_{between}$: The variance of the means of the chains.
+
+-   $V_{within}$: The average variance within each chain.
+
+-   $N$: The number of iterations in each chain.
+
+An $\hat{R}$ value of 1 indicates that the chains have converged and are sampling from the same distribution, $\hat{R}<1.05$ Generally indicates good convergence, and $1.05<\hat{R}<1.1$ suggests potential convergence issues. Both models reported an $\hat{R}$ value of $1.001$, indicating good convergence and reliable estimates.
+
+#### n.eff.
+
+As $\hat{R}$ was good, and more importantly very good in both models, we'll be looking at their n.eff.
+
+n.eff. or effective sample size, is a measure used to assess the number of independent samples drawn from a posterior distribution after accounting for autocorrelation in MCMC simulations. A higher n.eff.. indicates more independent information in the samples, suggesting that the MCMC has mixed well and the posterior distribution is well approximated. A good n.eff. also needs to be close to the number of samples. With both models having around 3000 for each parameter along with a couple of differences, they are once again very similar. However, there is room for improvement as the sample size is 10000 (as the first 2000 are discarded). This suggests that while some autocorrelation exists, you still have a significant amount of independent information.
+
+#### Predictive accuracy
+
+Since both models have very little to separate them when it comes to the aforementioned statistics, we shall calculate the mean residuals for each model to see which one performs better. We shall start with the initial model
+
+##### Initial model
+
+```{r ,align='center',echo=FALSE}
+set.seed(1245)
+beta0_samples <- jags_model$BUGSoutput$sims.list$beta0
+beta_hours_studied_samples <- jags_model$BUGSoutput$sims.list$beta_hours_studied
+beta_previous_scores_samples <- jags_model$BUGSoutput$sims.list$beta_previous_scores
+beta_sleep_hours_samples <- jags_model$BUGSoutput$sims.list$beta_sleep_hours
+beta_sample_question_papers_practiced_samples <- jags_model$BUGSoutput$sims.list$beta_sample_question_papers_practiced
+beta_extracurricular_activities_samples <- jags_model$BUGSoutput$sims.list$beta_extracurricular_activities
+test_data <- data.frame(
+  Hours_Studied = test$Hours_Studied,
+  Previous_Scores = test$Previous_Scores,
+  Sleep_Hours = test$Sleep_Hours,
+  Sample_Question_Papers_Practiced = test$Sample_Question_Papers_Practiced,
+  Extracurricular_Activities = test$Extracurricular_Activities
+)
+n_samples <- length(beta0_samples)
+n_test <- nrow(test_data)
+
+predictions <- matrix(NA, nrow = n_samples, ncol = n_test)
+
+for (j in 1:n_test) {
+  mu <- beta0_samples +
+    beta_hours_studied_samples * test_data$Hours_Studied[j] +
+    beta_previous_scores_samples * test_data$Previous_Scores[j] +
+    beta_sleep_hours_samples * test_data$Sleep_Hours[j] +
+    beta_sample_question_papers_practiced_samples * test_data$Sample_Question_Papers_Practiced[j] +
+    beta_extracurricular_activities_samples * test_data$Extracurricular_Activities[j]
+  
+  predictions[, j] <- rnorm(n_samples, mu, sqrt(1 / jags_model$BUGSoutput$sims.list$tau))
+}
+predicted_means <- apply(predictions, 2, mean)
+predicted_intervals <- apply(predictions, 2, quantile, probs = c(0.025, 0.975))
+test$bayes <- predicted_means
+test$residuals_bayes<- test$Performance_Index - test$bayes
+
+mean_residual <- mean(test$residuals_bayes)
+paste("Initial model mean residual",mean_residual)
+```
+
+```{r ,align='center',echo=FALSE}
+lower_bound <- predicted_intervals[1, ]
+upper_bound <- predicted_intervals[2, ]
+ggplot(test, aes(x = test$Performance_Index, y = test$bayes)) +
+  geom_point(color = "light blue") +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +  
+  geom_line(aes(x =lower_bound , y = test$bayes), color = "red") +  
+  geom_line(aes(x =upper_bound , y = test$bayes), color = "green") +  
+  labs(title = "Observed vs. Predicted Values for initial model",
+       x = "Observed Values",
+       y = "Predicted Values")
+```
+
+##### Alternative model
+
+```{r ,align='center',echo=FALSE}
+set.seed(1245)
+beta0_samples <- jags_model_alt$BUGSoutput$sims.list$beta0
+beta_hours_studied_samples <- jags_model_alt$BUGSoutput$sims.list$beta_hours_studied
+beta_previous_scores_samples <- jags_model_alt$BUGSoutput$sims.list$beta_previous_scores
+beta_sleep_hours_samples <- jags_model_alt$BUGSoutput$sims.list$beta_sleep_hours
+beta_sample_question_papers_practiced_samples <- jags_model_alt$BUGSoutput$sims.list$beta_sample_question_papers_practiced
+beta_extracurricular_activities_samples <- jags_model_alt$BUGSoutput$sims.list$beta_extracurricular_activities
+test_data <- data.frame(
+  Hours_Studied = test$Hours_Studied,
+  Previous_Scores = test$Previous_Scores,
+  Sleep_Hours = test$Sleep_Hours,
+  Sample_Question_Papers_Practiced = test$Sample_Question_Papers_Practiced,
+  Extracurricular_Activities = test$Extracurricular_Activities
+)
+n_samples <- length(beta0_samples)
+n_test <- nrow(test_data)
+
+predictions <- matrix(NA, nrow = n_samples, ncol = n_test)
+
+for (j in 1:n_test) {
+  mu <- beta0_samples +
+    beta_hours_studied_samples * test_data$Hours_Studied[j] +
+    beta_previous_scores_samples * test_data$Previous_Scores[j] +
+    beta_sleep_hours_samples * test_data$Sleep_Hours[j] +
+    beta_sample_question_papers_practiced_samples * test_data$Sample_Question_Papers_Practiced[j] +
+    beta_extracurricular_activities_samples * test_data$Extracurricular_Activities[j]
+  
+  predictions[, j] <- rnorm(n_samples, mu, sqrt(1 / jags_model$BUGSoutput$sims.list$tau))
+}
+predicted_means <- apply(predictions, 2, mean)
+predicted_intervals <- apply(predictions, 2, quantile, probs = c(0.025, 0.975))
+test$bayes_2 <- predicted_means
+test$residuals_bayes_2<- test$Performance_Index - test$bayes_2
+
+mean_residual <- mean(test$residuals_bayes_2)
+paste("Alternative model mean residual",mean_residual)
+```
+
+```{r ,align='center',echo=FALSE}
+lower_bound <- predicted_intervals[1, ]
+upper_bound <- predicted_intervals[2, ]
+ggplot(test, aes(x = test$Performance_Index, y = test$bayes_2)) +
+  geom_point(color = "light blue") +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +  
+  geom_line(aes(x =lower_bound , y = test$bayes_2), color = "red") +  
+  geom_line(aes(x =upper_bound , y = test$bayes_2), color = "green") +  
+  labs(title = "Observed vs. Predicted Values for alternative model",
+       x = "Observed Values",
+       y = "Predicted Values")
+```
+
+
+Hence, we shall go with the initial model as it edges out the alternative model in all metrics. Although the difference is negligible, it still has better values for said metrics.
+
+
+#### Model Checking diagnostics and discussion
+Since we will go with the initial model, we shall run some diagnostics to evaluate the reliability and validity of the estimates obtained from the JAGS model.
+
+##### Trace Plots
+Trace plots are used to visually assess the sampling behavior of each parameter in a Bayesian model. They show how the sampled values of a parameter evolve over the iterations of the MCMC algorithm, helping to check if the chain has converged and is mixing well. What we are looking for is random fluctuation around a stable mean value and having good mixing, which is indicated by frequent transitions across the parameter space, without long periods where the chain gets stuck in one region. We should also be looking for the convergence of all 3 chains, which is indicated by the overlapping of the chains after some iterations.
+
+```{r ,align='center',echo=FALSE}
+mcmc_samples <- as.mcmc(jags_model)
+samples_list <- lapply(mcmc_samples, as.data.frame) 
+samples_df <- do.call(rbind, lapply(1:length(samples_list), function(i) {
+  df <- samples_list[[i]]
+  df$chain <- i  
+  df
+}))
+samples_long <- melt(samples_df, id.vars = "chain", variable.name = "parameter", value.name = "value")
+samples_long$iteration <- rep(1:nrow(samples_list[[1]]), times = length(samples_list))
+
+ggplot(samples_long, aes(x = iteration, y = value, color = factor(chain))) +
+  geom_line(alpha = 0.8) +
+  facet_wrap(~parameter, scales = "free") +
+  labs(title = "Trace Plots of Parameters by Chain", x = "Iteration", y = "Value", color = "Chain")
+
+ 
+
+```
+
+
+In our trace plots we see that the values fluctuate randomly around a central value, suggesting that the MCMC process has reached a stable posterior distribution. We also see that there is no upward or downward trend. Both of these aspects show convergence. We also see that the chains are mixing and overlapping. 
+
+##### ACF plot
+An ACF plot is used to analyze how a variable's values are correlated with its own past values at various time lags and it helps assess how well the sampling algorithm is performing and whether the samples in the chain are independent of each other.
+```{r ,align='center',echo=FALSE}
+compute_acf <- function(param_chain, lag_max = 20) {
+  acf_data <- acf(param_chain, plot = FALSE, lag.max = lag_max)
+  data.frame(Lag = acf_data$lag, ACF = acf_data$acf)
+}
+
+param_names <- colnames(as.matrix(mcmc_samples))
+acf_results <- lapply(param_names, function(param) {
+  param_chain <- as.matrix(mcmc_samples)[, param]
+  acf_data <- compute_acf(param_chain)
+  acf_data$Parameter <- param
+  return(acf_data)
+})
+
+acf_data_combined <- bind_rows(acf_results)
+ggplot(acf_data_combined, aes(x = Lag, y = ACF)) +
+  geom_line() +
+  facet_wrap(~ Parameter, scales = "free_y") +
+  labs(title = "ACF Plots for MCMC Parameters",
+       x = "Lag",
+       y = "Autocorrelation")
+```
+
+
+As all plots shown above have a drop in autocorrelation to a value close to 0 very quickly, this shows that the chain is moving independently from one iteration to the next, indicating good mixing.
+
+##### Density plot
+
+A density plot  shows the estimated probability density function of the posterior distributions of the parameters sampled from the model. What we need to check is the symmetry of the density and if the chains overlap.
+
+```{r ,align='center',echo=FALSE}
+
+samples_long <- melt(samples_df, id.vars = "chain", variable.name = "parameter", value.name = "value")
+ggplot(samples_long, aes(x = value, color = factor(chain))) +
+  geom_density() +
+  facet_wrap(~parameter, scales = "free") +
+  labs(title = "Density Plots of Parameters by Chain", x = "Value", y = "Density", color = "Chain")
+
+```
+
+
+As seen by the density plots above, the densities for the parameters are all symmetric. Symmetry implies that the parameter estimates are stable and not biased in one direction. We can also see that the chains are overlapping, this is a strong indicator that our MCMC sampling has reached a stationary distribution. 
+
+
+All diagnostic graphs shows that our model is reliable, is performing well, and that the MCMC sampling has converged effectively. This is also backed up by our good predictions as shown by the low mean residual obtained.
+
+# Conclusion
+
+In conclusion, we managed to use both an inferential as well as a Bayesian approach to estimate a student's performance based on several factors. We also implemented an alternative Bayesian model, implementing priors based on existing literature, to check if we can improve on our results even further. As evident by the results obtained by both the inferential as well as the Bayesian model, both approaches work and produce great results. Furthermore, we used diagnostics to check for the performance of our Bayesian model. Our findings show that the variables (Hours studied, hours slept, extracurricular activity participation,etc..) were a good enough predictor for a student's academic performance. 
